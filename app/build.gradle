@@ -42,5 +42,5 @@ dependencies {
     implementation "androidx.activity:activity-ktx:1.9.3"
     implementation "androidx.preference:preference-ktx:1.2.1"
     implementation "androidx.documentfile:documentfile:1.0.1"
-    implementation "com.arthenica:ffmpeg-kit-full:6.0-2.LTS"
+    implementation "com.mrljdx:ffmpeg-kit-full:6.0"
 }
