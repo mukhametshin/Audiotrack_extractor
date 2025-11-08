@@ -21,18 +21,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Принимаем все лицензии БЕЗ вопросов
-      - name: Accept Android SDK licenses (non-interactive)
-        run: |
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+- name: Accept Android SDK licenses
+      run: |
+        yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
 
-      # Ставим нужные пакеты под compileSdk=35 и buildTools=35.0.0
-      - name: Install Android SDK packages
-        run: |
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+    - name: Install required SDK packages
+      run: |
+        yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
+          "platform-tools" \
+          "platforms;android-35" \
+          "build-tools;35.0.0" >/dev/null
 
       # Собираем без wrapper-а, фиксированной версией Gradle
       - name: Build with Gradle
