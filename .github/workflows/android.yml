@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,18 +21,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept licenses & install SDK components
+      # Принимаем все лицензии БЕЗ вопросов
+      - name: Accept Android SDK licenses (non-interactive)
         run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
 
-      - name: Build with Gradle (no wrapper)
+      # Ставим нужные пакеты под compileSdk=35 и buildTools=35.0.0
+      - name: Install Android SDK packages
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      # Собираем без wrapper-а, фиксированной версией Gradle
+      - name: Build with Gradle
         uses: gradle/gradle-build-action@v3
         with:
-          gradle-version: 8.7
+          gradle-version: 8.9
           arguments: assembleDebug
 
       - name: Upload debug APK
