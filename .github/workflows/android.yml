@@ -8,7 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
+      # В хостовом раннере GitHub SDK уже предустановлен сюда
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
@@ -20,25 +22,31 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
-- name: Accept Android SDK licenses
-      run: |
-        yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
+      # Лицензии принимаем неинтерактивно (иначе job может зависнуть)
+      - name: Accept Android SDK licenses (non-interactive)
+        shell: bash
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
 
-    - name: Install required SDK packages
-      run: |
-        yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
-          "platform-tools" \
-          "platforms;android-35" \
-          "build-tools;35.0.0" >/dev/null
+      # Ставим нужные компоненты под compileSdk 35 и buildTools 35.0.0
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" >/dev/null
 
-      # Собираем без wrapper-а, фиксированной версией Gradle
-      - name: Build with Gradle
+      # Собираем проект без gradle-wrapper (gradle скачает action)
+      - name: Build (assembleDebug)
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.9
-          arguments: assembleDebug
+          arguments: assembleDebug --stacktrace
 
+      # Кладём APK как артефакт сборки
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
