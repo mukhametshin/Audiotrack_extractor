@@ -23,34 +23,39 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # Ставим cmdline-tools (sdkmanager), если вдруг нет
+      # Устанавливаем cmdline-tools (sdkmanager) при необходимости
       - name: Ensure cmdline-tools (sdkmanager)
         shell: bash
         run: |
           set -euxo pipefail
-          if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-            curl -sSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076728_latest.zip
-            unzip -q /tmp/cmdtools.zip -d /tmp
+          SDKMAN="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMAN" ]; then
+            TMP=/tmp/cmdtools
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" "$TMP"
+            curl -sSL -o "$TMP/cmdtools.zip" https://dl.google.com/android/repository/commandlinetools-linux-11076728_latest.zip
+            unzip -q "$TMP/cmdtools.zip" -d "$TMP"
             mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            mv /tmp/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+            mv "$TMP/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
           fi
           echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          sdkmanager --version
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version
 
-      # Принимаем лицензии без интерактива (через printf, чтобы не ловить Broken pipe)
+      # Принимаем лицензии без интерактива
       - name: Accept Android SDK licenses (non-interactive)
         shell: bash
         run: |
-          set -euxo pipefail
-          printf 'y\ny\ny\ny\ny\ny\ny\n' | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" || true
+          set -euo pipefail
+          SDK="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          # Подаём ограниченное число 'y', чтобы не словить Broken pipe
+          { for i in {1..10}; do printf 'y\n'; done; } \
+            | "$SDK" --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
 
-      # Ставим нужные пакеты (без пайпа yes)
+      # Ставим нужные пакеты (без 'yes |')
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euxo pipefail
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
