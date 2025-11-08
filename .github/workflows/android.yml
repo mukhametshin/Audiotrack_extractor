@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # В хостовом раннере GitHub SDK уже предустановлен сюда
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
@@ -24,29 +23,53 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # Лицензии принимаем неинтерактивно (иначе job может зависнуть)
-      - name: Accept Android SDK licenses (non-interactive)
+      # Ставим cmdline-tools (если вдруг нет) и добавляем sdkmanager в PATH
+      - name: Ensure cmdline-tools
         shell: bash
         run: |
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
+          set -e
+          if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+            curl -sSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076728_latest.zip
+            unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            mv /tmp/cmdtools/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest"/
+          fi
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          sdkmanager --version
 
-      # Ставим нужные компоненты под compileSdk 35 и buildTools 35.0.0
+      # Принимаем лицензии неинтерактивно (если уже приняты — шаг пройдёт)
+      - name: Accept Android SDK licenses
+        shell: bash
+        run: |
+          sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" <<EOF
+y
+y
+y
+y
+y
+y
+y
+EOF
+
+      # Ставим нужные пакеты (без пайпа yes — чтобы не словить Broken pipe)
       - name: Install Android SDK packages
         shell: bash
         run: |
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
+          set -e
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" \
             "platforms;android-35" \
-            "build-tools;35.0.0" >/dev/null
+            "build-tools;35.0.0"
+          echo "Installed packages:"
+          sdkmanager --list | sed -n '1,120p' || true
 
-      # Собираем проект без gradle-wrapper (gradle скачает action)
       - name: Build (assembleDebug)
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.9
           arguments: assembleDebug --stacktrace
 
-      # Кладём APK как артефакт сборки
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
