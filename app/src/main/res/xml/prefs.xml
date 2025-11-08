@@ -1,4 +1,5 @@
-<preferences xmlns:android="http://schemas.android.com/apk/res/android">
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <PreferenceCategory android:title="Куда сохранять">
         <Preference
@@ -11,9 +12,9 @@
         <EditTextPreference
             android:key="subfolder"
             android:title="Подпапка"
-            android:useSimpleSummaryProvider="true"
             android:dialogTitle="Имя подпапки в выбранной папке"
-            android:defaultValue="AudioExtracted" />
+            android:defaultValue="AudioExtracted"
+            app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Имя файла">
@@ -22,7 +23,7 @@
             android:title="Шаблон имени"
             android:dialogTitle="Шаблон имени файла"
             android:defaultValue="{name}.{ext}"
-            android:useSimpleSummaryProvider="true" />
+            app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Аудиодорожка">
@@ -32,7 +33,7 @@
             android:defaultValue="prompt"
             android:entries="@array/track_mode_entries"
             android:entryValues="@array/track_mode_values"
-            android:useSimpleSummaryProvider="true" />
+            app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
-</preferences>
+</PreferenceScreen>
