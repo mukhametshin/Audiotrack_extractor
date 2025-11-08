@@ -23,46 +23,37 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # Ставим cmdline-tools (если вдруг нет) и добавляем sdkmanager в PATH
-      - name: Ensure cmdline-tools
+      # Ставим cmdline-tools (sdkmanager), если вдруг нет
+      - name: Ensure cmdline-tools (sdkmanager)
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
           if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
             mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
             curl -sSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076728_latest.zip
-            unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+            unzip -q /tmp/cmdtools.zip -d /tmp
             mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            mv /tmp/cmdtools/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest"/
+            mv /tmp/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
           fi
-          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           sdkmanager --version
 
-      # Принимаем лицензии неинтерактивно (если уже приняты — шаг пройдёт)
-      - name: Accept Android SDK licenses
+      # Принимаем лицензии без интерактива (через printf, чтобы не ловить Broken pipe)
+      - name: Accept Android SDK licenses (non-interactive)
         shell: bash
         run: |
-          sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" <<EOF
-y
-y
-y
-y
-y
-y
-y
-EOF
+          set -euxo pipefail
+          printf 'y\ny\ny\ny\ny\ny\ny\n' | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" || true
 
-      # Ставим нужные пакеты (без пайпа yes — чтобы не словить Broken pipe)
+      # Ставим нужные пакеты (без пайпа yes)
       - name: Install Android SDK packages
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
           sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
-          echo "Installed packages:"
-          sdkmanager --list | sed -n '1,120p' || true
 
       - name: Build (assembleDebug)
         uses: gradle/gradle-build-action@v3
