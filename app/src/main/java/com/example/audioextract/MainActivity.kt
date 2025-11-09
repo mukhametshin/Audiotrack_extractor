@@ -86,24 +86,9 @@ class MainActivity : AppCompatActivity() {
             addAction(ExtractService.ACTION_ERROR)
             addAction(ExtractService.ACTION_DONE)
         }
-        // Без прямой ссылки на константы API 33 (для совместимости со старыми compileSdk)
-        if (Build.VERSION.SDK_INT >= 33) {
-            try {
-                val m = Context::class.java.getMethod(
-                    "registerReceiver",
-                    BroadcastReceiver::class.java,
-                    IntentFilter::class.java,
-                    Int::class.javaPrimitiveType
-                )
-                m.invoke(this, progressReceiver, f, 0)
-            } catch (_: Throwable) {
-                @Suppress("DEPRECATION")
-                registerReceiver(progressReceiver, f)
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(progressReceiver, f)
-        }
+        @Suppress("DEPRECATION", "UnspecifiedRegisterReceiverFlag")
+        fun registerOld() { registerReceiver(progressReceiver, f) }
+        registerOld()
     }
 
     override fun onStop() {

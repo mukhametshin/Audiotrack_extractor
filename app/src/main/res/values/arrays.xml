@@ -1,13 +1,11 @@
-
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="track_mode_entries">
-        <item>Спрашивать каждый раз</item>
-        <item>Всегда брать первую</item>
-        <item>Запомнить выбранную</item>
+        <item>Спросить каждый раз</item>
+        <item>Помнить индекс (из настроек)</item>
     </string-array>
     <string-array name="track_mode_values">
         <item>prompt</item>
-        <item>first</item>
         <item>remember</item>
     </string-array>
 </resources>

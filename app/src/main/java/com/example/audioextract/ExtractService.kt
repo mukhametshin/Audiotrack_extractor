@@ -1,6 +1,5 @@
 package com.example.audioextract
 
-import android.app.PendingIntent
 import android.app.Service
 import android.content.ContentValues
 import android.content.Intent
@@ -60,7 +59,6 @@ class ExtractService : Service() {
             .build()
         startForeground(NOTIF_ID, notif)
 
-        // Глобальный логгер FFmpeg — выводим строки по мере поступления.
         FFmpegKitConfig.enableLogCallback { l ->
             try { log(" > " + (l.message ?: "")) } catch (_: Throwable) {}
         }
@@ -109,7 +107,6 @@ class ExtractService : Service() {
         val displayName = queryDisplayName(src) ?: "audio"
         log("Имя в медиатеке: $displayName")
 
-        // FFprobe
         log("FFprobe: анализ дорожек")
         val probe = FFprobeKit.getMediaInformation(inPath)
         if (!ReturnCode.isSuccess(probe.returnCode)) {
@@ -130,7 +127,7 @@ class ExtractService : Service() {
 
         val mapping = chooseExtAndMime(codec)
 
-        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
         val template = prefs.getString("name_template", "{name}.{ext}") ?: "{name}.{ext}"
         val subfolder = prefs.getString("subfolder", "AudioExtracted") ?: "AudioExtracted"
         val dirUriStr = prefs.getString("dir_uri", null)
@@ -218,16 +215,16 @@ class ExtractService : Service() {
             .replace("{lang}", lang)
 
     private fun queryDisplayName(uri: Uri): String? {
-        val projection = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME)
+        val projection = arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME)
         contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val idx = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns.DISPLAY_NAME)
             if (cursor.moveToFirst()) return cursor.getString(idx)
         }
         return null
     }
 
     private fun saveToSAF(srcFile: File, treeUriStr: String, subfolder: String, displayName: String, mime: String): Uri {
-        val tree = DocumentFile.fromTreeUri(this, Uri.parse(treeUriStr))
+        val tree = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, Uri.parse(treeUriStr))
             ?: throw IllegalStateException("Выбранная папка недоступна")
         val targetDir = if (subfolder.isNotBlank()) {
             tree.findFile(subfolder) ?: tree.createDirectory(subfolder) ?: tree
@@ -241,38 +238,38 @@ class ExtractService : Service() {
 
     private fun saveToDownloads(srcFile: File, displayName: String, mime: String): Uri {
         val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, displayName)
-            put(MediaStore.Downloads.MIME_TYPE, mime)
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AudioExtracted")
-            put(MediaStore.Downloads.IS_PENDING, 1)
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, displayName)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, mime)
+            put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/AudioExtracted")
+            put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
         }
         val resolver = contentResolver
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: throw IllegalStateException("Не удалось создать файл в Загрузках")
         resolver.openOutputStream(uri)?.use { out ->
             srcFile.inputStream().use { it.copyTo(out) }
         } ?: throw IllegalStateException("Не удалось открыть целевой поток")
         values.clear()
-        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
         resolver.update(uri, values, null, null)
         return uri
     }
 
     private fun saveLogToDownloads(): Uri? {
         return try {
-            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
             val name = "AudioExtract_log_$ts.txt"
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, name)
-                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AudioExtracted/logs")
-                put(MediaStore.Downloads.IS_PENDING, 1)
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain")
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/AudioExtracted/logs")
+                put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
             }
             val resolver = contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
             resolver.openOutputStream(uri)?.use { it.write(sb.toString().toByteArray()) } ?: return null
             values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
             uri
         } catch (_: Throwable) { null }
