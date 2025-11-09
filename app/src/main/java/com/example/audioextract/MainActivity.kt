@@ -34,11 +34,11 @@ class MainActivity : AppCompatActivity() {
         maybeAskNotifPermission { handleIntent(intent) }
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         maybeAskNotifPermission { handleIntent(intent) }
-    }
+}
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
