@@ -8,9 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout
@@ -23,53 +23,60 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # Устанавливаем cmdline-tools (sdkmanager) при необходимости
       - name: Ensure cmdline-tools (sdkmanager)
         shell: bash
         run: |
           set -euxo pipefail
-          SDKMAN="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMAN" ]; then
-            TMP=/tmp/cmdtools
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" "$TMP"
-            curl -sSL -o "$TMP/cmdtools.zip" https://dl.google.com/android/repository/commandlinetools-linux-11076728_latest.zip
-            unzip -q "$TMP/cmdtools.zip" -d "$TMP"
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            mv "$TMP/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+          SDK="$ANDROID_SDK_ROOT"
+          mkdir -p "$SDK/cmdline-tools"
+          if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmd.zip
+            mkdir -p /tmp/cmd && unzip -q /tmp/cmd.zip -d /tmp/cmd
+            mv /tmp/cmd/cmdline-tools "$SDK/cmdline-tools/latest"
           fi
-          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          sdkmanager --version
 
-      # Принимаем лицензии без интерактива
       - name: Accept Android SDK licenses (non-interactive)
         shell: bash
         run: |
           set -euo pipefail
-          SDK="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          # Подаём ограниченное число 'y', чтобы не словить Broken pipe
           { for i in {1..10}; do printf 'y\n'; done; } \
-            | "$SDK" --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
+            | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
 
-      # Ставим нужные пакеты (без 'yes |')
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euxo pipefail
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" \
             "platforms;android-35" \
-            "build-tools;35.0.0"
-            
-      - name: Setup Gradle
+            "build-tools;35.0.0" || true
+
+      - name: Setup Gradle caching
         uses: gradle/actions/setup-gradle@v3
+
+      # ВАЖНО: убедиться, что есть wrapper и он исполняемый
+      - name: Verify Gradle wrapper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ls -la
+          if [ ! -f ./gradlew ]; then
+            echo "::error ::Gradle wrapper (./gradlew) не найден. Добавь в репозиторий файлы: gradlew, gradlew.bat, gradle/wrapper/gradle-wrapper.jar, gradle/wrapper/gradle-wrapper.properties"
+            exit 1
+          fi
+          chmod +x ./gradlew
+          ./gradlew --version
 
       - name: Build (clean assembleDebug)
         env:
           ORG_GRADLE_CONSOLE: plain
-        run: ./gradlew --no--daemon clean assembleDebug --stacktrace --info --warning-mode all
+        run: ./gradlew --no-daemon clean assembleDebug --stacktrace --info --warning-mode all
 
       - name: Upload debug APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
