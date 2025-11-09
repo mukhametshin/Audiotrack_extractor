@@ -11,10 +11,11 @@ import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import androidx.preference.PreferenceManager
 import androidx.core.app.NotificationCompat
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFprobeKit
-import com.arthenica.ffmpegkit.ReturnCode
+import com.arthenica.ffmpegkit.*
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ExtractService : Service() {
 
@@ -23,11 +24,25 @@ class ExtractService : Service() {
         const val EXTRA_AUDIO_INDEX = "audioIndex"
         private const val NOTIF_ID = 1001
 
+        const val ACTION_LOG = "com.example.audioextract.LOG"
         const val ACTION_PROGRESS = "com.example.audioextract.PROGRESS"
+        const val ACTION_ERROR = "com.example.audioextract.ERROR"
         const val ACTION_DONE = "com.example.audioextract.DONE"
         const val EXTRA_TOTAL = "total"
         const val EXTRA_CURRENT = "current"
         const val EXTRA_MESSAGE = "message"
+        const val EXTRA_LOG_URI = "log_uri"
+    }
+
+    private val sb = StringBuilder()
+    private var ok = 0
+    private var err = 0
+
+    private fun log(msg: String) {
+        val ts = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        val line = "[$ts] $msg"
+        sb.append(line).append('\\n')
+        sendBroadcast(Intent(ACTION_LOG).setPackage(packageName).putExtra(EXTRA_MESSAGE, line))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -47,24 +62,30 @@ class ExtractService : Service() {
 
         sendBroadcast(Intent(ACTION_PROGRESS).setPackage(packageName)
             .putExtra(EXTRA_TOTAL, uris.size).putExtra(EXTRA_CURRENT, 0).putExtra(EXTRA_MESSAGE, "Подготовка…"))
+        log("Файлов в очереди: ${uris.size}")
 
         Thread {
             uris.forEachIndexed { idx, uri ->
                 try {
                     processOne(uri, idx, uris.size, audioIndex)
+                    ok++
                     sendBroadcast(Intent(ACTION_PROGRESS).setPackage(packageName)
                         .putExtra(EXTRA_TOTAL, uris.size)
                         .putExtra(EXTRA_CURRENT, idx + 1)
                         .putExtra(EXTRA_MESSAGE, "Готово: ${idx + 1}/${uris.size}"))
-                } catch (_: Throwable) {
-                    sendBroadcast(Intent(ACTION_PROGRESS).setPackage(packageName)
-                        .putExtra(EXTRA_TOTAL, uris.size)
-                        .putExtra(EXTRA_CURRENT, idx + 1)
-                        .putExtra(EXTRA_MESSAGE, "Ошибка на файле ${idx + 1}/${uris.size}"))
+                } catch (t: Throwable) {
+                    err++
+                    val em = t.message ?: t::class.java.simpleName
+                    log("ОШИБКА: $em")
+                    sendBroadcast(Intent(ACTION_ERROR).setPackage(packageName)
+                        .putExtra(EXTRA_MESSAGE, "Файл ${idx + 1}: $em"))
                 }
             }
+            val logUri = saveLogToDownloads()
+            val summary = "Завершено. Успехов=$ok, ошибок=$err. Лог: ${logUri ?: "недоступен"}"
             sendBroadcast(Intent(ACTION_DONE).setPackage(packageName)
-                .putExtra(EXTRA_MESSAGE, "Готово: ${uris.size} файл(ов)"))
+                .putExtra(EXTRA_MESSAGE, summary)
+                .putExtra(EXTRA_LOG_URI, logUri?.toString()))
             stopSelf()
         }.start()
 
@@ -72,16 +93,29 @@ class ExtractService : Service() {
     }
 
     private fun processOne(src: Uri, index: Int, total: Int, audioIndex: Int) {
+        log("==== Файл ${index + 1}/$total ====")
+        log("Вход: $src")
+
+        val pfd = contentResolver.openFileDescriptor(src, "r")
+            ?: throw IllegalStateException("Не удалось открыть дескриптор")
+        val inPath = "/proc/self/fd/${pfd.fd}"
+        log("FD path: $inPath")
+
         val displayName = queryDisplayName(src) ?: "audio"
-        val base = displayName.substringBeforeLast('.', displayName)
+        log("Имя в медиатеке: $displayName")
 
-        val info = FFprobeKit.getMediaInformation(src.toString()).mediaInformation
-            ?: throw IllegalStateException("FFprobe не получил информацию")
+        // FFprobe
+        log("FFprobe: анализ дорожек")
+        val info = FFprobeKit.getMediaInformation(inPath).mediaInformation
+            ?: throw IllegalStateException("FFprobe: нет информации")
         val audioStreams = info.streams.filter { it.type.equals("audio", true) }
+        log("FFprobe: аудиодорожек=${audioStreams.size}")
         val chosenExists = audioStreams.getOrNull(audioIndex) != null
-        val first = audioStreams.firstOrNull() ?: throw IllegalStateException("Аудиодорожка не найдена")
+        val chosen = if (chosenExists) audioIndex else 0
+        val first = audioStreams.getOrNull(chosen) ?: throw IllegalStateException("Аудиодорожка не найдена")
+        val codec = (first.codec ?: "").lowercase(Locale.US)
+        log("Выбрана дорожка #$chosen, codec=$codec")
 
-        val codec = (first.codec ?: "").lowercase(java.util.Locale.US)
         val mapping = chooseExtAndMime(codec)
 
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
@@ -89,43 +123,42 @@ class ExtractService : Service() {
         val subfolder = prefs.getString("subfolder", "AudioExtracted") ?: "AudioExtracted"
         val dirUriStr = prefs.getString("dir_uri", null)
 
+        val base = displayName.substringBeforeLast('.', displayName)
         val outName = sanitizeName(
             applyTemplate(template, base, mapping.ext, mapping.mime.substringAfter("/"), "", "", "")
         )
+        log("Итоговый файл: $outName (${mapping.mime})")
 
         val outTmp = File.createTempFile("out_", ".${mapping.ext}", cacheDir)
-        val mapArg = if (chosenExists) "0:a:$audioIndex" else "0:a:0"
 
-        val args = listOf(
+        val args = arrayOf(
             "-hide_banner", "-y",
-            "-i", src.toString(),
-            "-map", mapArg,
+            "-i", inPath,
+            "-map", "0:a:$chosen",
             "-c", "copy",
             outTmp.absolutePath
         )
+        log("FFmpeg: " + args.joinToString(" "))
 
-        // IMPORTANT: FFmpegKit expects an Array<String>, not a List<String>
-        val session = FFmpegKit.executeWithArguments(args.toTypedArray())
-        if (!ReturnCode.isSuccess(session.returnCode)) {
+        val session = FFmpegKit.executeWithArguments(args)
+        val rc = session.returnCode
+        log("FFmpeg: return=$rc, state=${session.state}")
+
+        session.allLogs.take(10).forEach { l -> log(" > " + l.message) }
+
+        if (!ReturnCode.isSuccess(rc)) {
+            pfd.close()
             outTmp.delete()
-            throw IllegalStateException("FFmpeg error: ${session.returnCode}")
+            throw IllegalStateException("FFmpeg error: $rc")
         }
 
         val saved = if (dirUriStr != null)
             saveToSAF(outTmp, dirUriStr, subfolder, outName, mapping.mime)
         else
             saveToDownloads(outTmp, outName, mapping.mime)
+        log("Сохранено: $saved")
 
-        val openPi = PendingIntent.getActivity(
-            this, 0,
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(saved, mapping.mime)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            },
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        NotificationUtils.done(this, NOTIF_ID, "Извлечение аудио", "Готово: ${index + 1}/$total", openPi)
-
+        pfd.close()
         outTmp.delete()
     }
 
@@ -174,7 +207,7 @@ class ExtractService : Service() {
         val outDoc = targetDir.createFile(mime, displayName) ?: throw IllegalStateException("Не удалось создать файл в папке")
         contentResolver.openOutputStream(outDoc.uri)?.use { out ->
             srcFile.inputStream().use { it.copyTo(out) }
-        } ?: throw IllegalStateException("Не удалось открыть целевой поток")
+        } ?: throw IllegalStateException("Не удалось открыть выходной поток")
         return outDoc.uri
     }
 
@@ -195,5 +228,25 @@ class ExtractService : Service() {
         values.put(MediaStore.Downloads.IS_PENDING, 0)
         resolver.update(uri, values, null, null)
         return uri
+    }
+
+    private fun saveLogToDownloads(): Uri? {
+        return try {
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val name = "AudioExtract_log_$ts.txt"
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AudioExtracted/logs")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val resolver = contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+            resolver.openOutputStream(uri)?.use { it.write(sb.toString().toByteArray()) } ?: return null
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            uri
+        } catch (_: Throwable) { null }
     }
 }

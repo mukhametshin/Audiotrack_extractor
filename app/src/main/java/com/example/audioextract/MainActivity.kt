@@ -25,6 +25,11 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
+    private lateinit var logView: TextView
+
+    private fun appendLog(line: String) {
+        logView.append((if (logView.text.isNullOrEmpty()) "" else "\n") + line)
+    }
 
     private val notifPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -33,18 +38,30 @@ class MainActivity : AppCompatActivity() {
     private val progressReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent) {
             when (intent.action) {
+                ExtractService.ACTION_LOG -> {
+                    val msg = intent.getStringExtra(ExtractService.EXTRA_MESSAGE) ?: return
+                    appendLog(msg)
+                }
                 ExtractService.ACTION_PROGRESS -> {
                     val total = intent.getIntExtra(ExtractService.EXTRA_TOTAL, 0)
                     val current = intent.getIntExtra(ExtractService.EXTRA_CURRENT, 0)
                     val msg = intent.getStringExtra(ExtractService.EXTRA_MESSAGE) ?: ""
-                    status.text = if (msg.isNotBlank()) msg else "Обработка: $current/$total"
+                    if (msg.isNotBlank()) appendLog(msg)
+                    status.text = "Обработка: $current/$total"
                     progress.visibility = View.VISIBLE
                     progress.isIndeterminate = false
                     progress.max = if (total > 0) total else 1
                     progress.progress = current.coerceAtMost(progress.max)
                 }
+                ExtractService.ACTION_ERROR -> {
+                    val msg = intent.getStringExtra(ExtractService.EXTRA_MESSAGE) ?: "Ошибка"
+                    appendLog("ERROR: " + msg)
+                    status.text = "Ошибка"
+                    progress.visibility = View.GONE
+                }
                 ExtractService.ACTION_DONE -> {
                     val msg = intent.getStringExtra(ExtractService.EXTRA_MESSAGE) ?: "Готово"
+                    appendLog(msg)
                     status.text = msg
                     progress.visibility = View.GONE
                 }
@@ -57,13 +74,16 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         status = findViewById(R.id.status)
         progress = findViewById(R.id.progress)
+        logView = findViewById(R.id.logView)
         maybeAskNotifPermission { handleIntent(intent) }
     }
 
     override fun onStart() {
         super.onStart()
         val f = IntentFilter().apply {
+            addAction(ExtractService.ACTION_LOG)
             addAction(ExtractService.ACTION_PROGRESS)
+            addAction(ExtractService.ACTION_ERROR)
             addAction(ExtractService.ACTION_DONE)
         }
         if (Build.VERSION.SDK_INT >= 33) {
@@ -118,17 +138,24 @@ class MainActivity : AppCompatActivity() {
                     status.text = "Не получил файл."; return
                 }
                 if (mode == "prompt") {
-                    val info = FFprobeKit.getMediaInformation(uri.toString()).mediaInformation
-                    val audios = info?.streams?.filter { it.type.equals("audio", true) } ?: emptyList()
-                    if (audios.size <= 1) {
-                        startExtractService(arrayListOf(uri), 0)
-                    } else {
-                        val items = audios.mapIndexed { idx, s -> "#$idx · ${(s.codec ?: "audio")}" }.toTypedArray()
-                        AlertDialog.Builder(this)
-                            .setTitle("Выбери аудиодорожку")
-                            .setItems(items) { _, which -> startExtractService(arrayListOf(uri), which) }
-                            .setCancelable(true)
-                            .show()
+                    try {
+                        appendLog("FFprobe: анализ входа $uri")
+                        val info = FFprobeKit.getMediaInformation(uri.toString()).mediaInformation
+                        val audios = info?.streams?.filter { it.type.equals("audio", true) } ?: emptyList()
+                        appendLog("Найдено аудиодорожек: ${audios.size}")
+                        if (audios.size <= 1) {
+                            startExtractService(arrayListOf(uri), 0)
+                        } else {
+                            val items = audios.mapIndexed { idx, s -> "#$idx · ${(s.codec ?: "audio")}" }.toTypedArray()
+                            androidx.appcompat.app.AlertDialog.Builder(this)
+                                .setTitle("Выбери аудиодорожку")
+                                .setItems(items) { _, which -> startExtractService(arrayListOf(uri), which) }
+                                .setCancelable(true)
+                                .show()
+                        }
+                    } catch (t: Throwable) {
+                        appendLog("FFprobe ERROR: ${t.message}")
+                        status.text = "Ошибка анализа входного файла"
                     }
                 } else {
                     startExtractService(arrayListOf(uri), if (mode == "remember") prefs.getInt("remembered_index", 0) else 0)
@@ -144,13 +171,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startExtractService(uris: ArrayList<Uri>, audioIndex: Int) {
-        // Дадим доступ на чтение каждому URI и прокинем их через ClipData
         uris.forEach { grantUriPermission(packageName, it, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-
         val i = Intent(this, ExtractService::class.java)
             .putParcelableArrayListExtra(ExtractService.EXTRA_URI_LIST, uris)
             .putExtra(ExtractService.EXTRA_AUDIO_INDEX, audioIndex)
-        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
         if (uris.isNotEmpty()) {
             val clip = ClipData.newUri(contentResolver, "videos", uris.first())
