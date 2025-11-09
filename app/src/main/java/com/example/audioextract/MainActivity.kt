@@ -86,8 +86,20 @@ class MainActivity : AppCompatActivity() {
             addAction(ExtractService.ACTION_ERROR)
             addAction(ExtractService.ACTION_DONE)
         }
+        // Без прямой ссылки на константы API 33 (для совместимости со старыми compileSdk)
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(progressReceiver, f, Context.RECEIVER_NOT_EXPORTED)
+            try {
+                val m = Context::class.java.getMethod(
+                    "registerReceiver",
+                    BroadcastReceiver::class.java,
+                    IntentFilter::class.java,
+                    Int::class.javaPrimitiveType
+                )
+                m.invoke(this, progressReceiver, f, 0)
+            } catch (_: Throwable) {
+                @Suppress("DEPRECATION")
+                registerReceiver(progressReceiver, f)
+            }
         } else {
             @Suppress("DEPRECATION")
             registerReceiver(progressReceiver, f)
@@ -147,7 +159,7 @@ class MainActivity : AppCompatActivity() {
                             startExtractService(arrayListOf(uri), 0)
                         } else {
                             val items = audios.mapIndexed { idx, s -> "#$idx · ${(s.codec ?: "audio")}" }.toTypedArray()
-                            androidx.appcompat.app.AlertDialog.Builder(this)
+                            AlertDialog.Builder(this)
                                 .setTitle("Выбери аудиодорожку")
                                 .setItems(items) { _, which -> startExtractService(arrayListOf(uri), which) }
                                 .setCancelable(true)

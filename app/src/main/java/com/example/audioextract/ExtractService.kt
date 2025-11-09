@@ -41,7 +41,7 @@ class ExtractService : Service() {
     private fun log(msg: String) {
         val ts = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
         val line = "[$ts] $msg"
-        sb.append(line).append('\\n')
+        sb.append(line).append('\n')
         sendBroadcast(Intent(ACTION_LOG).setPackage(packageName).putExtra(EXTRA_MESSAGE, line))
     }
 
@@ -59,6 +59,11 @@ class ExtractService : Service() {
             .setOngoing(true)
             .build()
         startForeground(NOTIF_ID, notif)
+
+        // Глобальный логгер FFmpeg — выводим строки по мере поступления.
+        FFmpegKitConfig.enableLogCallback { l ->
+            try { log(" > " + (l.message ?: "")) } catch (_: Throwable) {}
+        }
 
         sendBroadcast(Intent(ACTION_PROGRESS).setPackage(packageName)
             .putExtra(EXTRA_TOTAL, uris.size).putExtra(EXTRA_CURRENT, 0).putExtra(EXTRA_MESSAGE, "Подготовка…"))
@@ -106,13 +111,20 @@ class ExtractService : Service() {
 
         // FFprobe
         log("FFprobe: анализ дорожек")
-        val info = FFprobeKit.getMediaInformation(inPath).mediaInformation
-            ?: throw IllegalStateException("FFprobe: нет информации")
+        val probe = FFprobeKit.getMediaInformation(inPath)
+        if (!ReturnCode.isSuccess(probe.returnCode)) {
+            pfd.close()
+            throw IllegalStateException("FFprobe return=${probe.returnCode}, state=${probe.state}")
+        }
+        val info = probe.mediaInformation ?: throw IllegalStateException("FFprobe: нет информации")
         val audioStreams = info.streams.filter { it.type.equals("audio", true) }
         log("FFprobe: аудиодорожек=${audioStreams.size}")
-        val chosenExists = audioStreams.getOrNull(audioIndex) != null
-        val chosen = if (chosenExists) audioIndex else 0
-        val first = audioStreams.getOrNull(chosen) ?: throw IllegalStateException("Аудиодорожка не найдена")
+        if (audioStreams.isEmpty()) {
+            pfd.close()
+            throw IllegalStateException("Аудиодорожек не найдено")
+        }
+        val chosen = if (audioStreams.getOrNull(audioIndex) != null) audioIndex else 0
+        val first = audioStreams[chosen]
         val codec = (first.codec ?: "").lowercase(Locale.US)
         log("Выбрана дорожка #$chosen, codec=$codec")
 
@@ -144,12 +156,20 @@ class ExtractService : Service() {
         val rc = session.returnCode
         log("FFmpeg: return=$rc, state=${session.state}")
 
-        session.allLogs.take(10).forEach { l -> log(" > " + l.message) }
-
         if (!ReturnCode.isSuccess(rc)) {
+            val st = session.failStackTrace
+            if (st != null) log("failStackTrace: $st")
             pfd.close()
             outTmp.delete()
             throw IllegalStateException("FFmpeg error: $rc")
+        }
+
+        val outSize = outTmp.length()
+        log("Временный файл: ${outTmp.absolutePath} (${outSize} байт)")
+        if (outSize <= 0) {
+            pfd.close()
+            outTmp.delete()
+            throw IllegalStateException("FFmpeg создал пустой файл")
         }
 
         val saved = if (dirUriStr != null)
@@ -157,6 +177,12 @@ class ExtractService : Service() {
         else
             saveToDownloads(outTmp, outName, mapping.mime)
         log("Сохранено: $saved")
+
+        try {
+            contentResolver.openAssetFileDescriptor(saved, "r")?.use { afd ->
+                log("Размер сохранённого файла: ${afd.length} байт")
+            }
+        } catch (_: Throwable) {}
 
         pfd.close()
         outTmp.delete()
@@ -175,6 +201,8 @@ class ExtractService : Service() {
         codec == "eac3" || codec.contains("ec3") -> ExtMime("eac3", "audio/eac3")
         codec.startsWith("pcm") -> ExtMime("wav", "audio/wav")
         codec.contains("amr") -> ExtMime("amr", "audio/amr")
+        codec.contains("dts") -> ExtMime("dts", "audio/vnd.dts")
+        codec.contains("truehd") -> ExtMime("mka", "audio/x-matroska")
         else -> ExtMime("mka", "audio/x-matroska")
     }
 
