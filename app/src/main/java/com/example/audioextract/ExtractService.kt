@@ -15,20 +15,25 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
-import java.util.Locale
 
 class ExtractService : Service() {
 
     companion object {
-        const val EXTRA_URIS = "uris"
+        const val EXTRA_URI_LIST = "uriList"
         const val EXTRA_AUDIO_INDEX = "audioIndex"
         private const val NOTIF_ID = 1001
+
+        const val ACTION_PROGRESS = "com.example.audioextract.PROGRESS"
+        const val ACTION_DONE = "com.example.audioextract.DONE"
+        const val EXTRA_TOTAL = "total"
+        const val EXTRA_CURRENT = "current"
+        const val EXTRA_MESSAGE = "message"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val strUris = intent?.getStringArrayListExtra(EXTRA_URIS) ?: arrayListOf()
+        val uris = intent?.getParcelableArrayListExtra<Uri>(EXTRA_URI_LIST) ?: arrayListOf()
         val audioIndex = intent?.getIntExtra(EXTRA_AUDIO_INDEX, 0) ?: 0
-        if (strUris.isEmpty()) { stopSelf(); return START_NOT_STICKY }
+        if (uris.isEmpty()) { stopSelf(); return START_NOT_STICKY }
 
         NotificationUtils.ensureChannel(this)
         val notif = NotificationCompat.Builder(this, NotificationUtils.CHANNEL_ID)
@@ -40,14 +45,26 @@ class ExtractService : Service() {
             .build()
         startForeground(NOTIF_ID, notif)
 
+        sendBroadcast(Intent(ACTION_PROGRESS).setPackage(packageName)
+            .putExtra(EXTRA_TOTAL, uris.size).putExtra(EXTRA_CURRENT, 0).putExtra(EXTRA_MESSAGE, "Подготовка…"))
+
         Thread {
-            strUris.forEachIndexed { idx, sUri ->
+            uris.forEachIndexed { idx, uri ->
                 try {
-                    processOne(Uri.parse(sUri), idx, strUris.size, audioIndex)
+                    processOne(uri, idx, uris.size, audioIndex)
+                    sendBroadcast(Intent(ACTION_PROGRESS).setPackage(packageName)
+                        .putExtra(EXTRA_TOTAL, uris.size)
+                        .putExtra(EXTRA_CURRENT, idx + 1)
+                        .putExtra(EXTRA_MESSAGE, "Готово: ${idx + 1}/${uris.size}"))
                 } catch (_: Throwable) {
-                    NotificationUtils.done(this, NOTIF_ID, "Извлечение аудио", "Ошибка на файле ${idx + 1}/${strUris.size}")
+                    sendBroadcast(Intent(ACTION_PROGRESS).setPackage(packageName)
+                        .putExtra(EXTRA_TOTAL, uris.size)
+                        .putExtra(EXTRA_CURRENT, idx + 1)
+                        .putExtra(EXTRA_MESSAGE, "Ошибка на файле ${idx + 1}/${uris.size}"))
                 }
             }
+            sendBroadcast(Intent(ACTION_DONE).setPackage(packageName)
+                .putExtra(EXTRA_MESSAGE, "Готово: ${uris.size} файл(ов)"))
             stopSelf()
         }.start()
 
@@ -55,21 +72,16 @@ class ExtractService : Service() {
     }
 
     private fun processOne(src: Uri, index: Int, total: Int, audioIndex: Int) {
-        val inTmp = File.createTempFile("in_", ".bin", cacheDir)
-        contentResolver.openInputStream(src)?.use { input ->
-            inTmp.outputStream().use { output -> input.copyTo(output) }
-        } ?: throw IllegalStateException("Не удалось открыть входной поток")
-
-        val displayName = queryDisplayName(src) ?: inTmp.name
+        val displayName = queryDisplayName(src) ?: "audio"
         val base = displayName.substringBeforeLast('.', displayName)
 
-        val info = FFprobeKit.getMediaInformation(inTmp.absolutePath).mediaInformation
+        val info = FFprobeKit.getMediaInformation(src.toString()).mediaInformation
             ?: throw IllegalStateException("FFprobe не получил информацию")
         val audioStreams = info.streams.filter { it.type.equals("audio", true) }
         val chosenExists = audioStreams.getOrNull(audioIndex) != null
         val first = audioStreams.firstOrNull() ?: throw IllegalStateException("Аудиодорожка не найдена")
 
-        val codec = (first.codec ?: "").lowercase(Locale.US)
+        val codec = (first.codec ?: "").lowercase(java.util.Locale.US)
         val mapping = chooseExtAndMime(codec)
 
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
@@ -77,19 +89,24 @@ class ExtractService : Service() {
         val subfolder = prefs.getString("subfolder", "AudioExtracted") ?: "AudioExtracted"
         val dirUriStr = prefs.getString("dir_uri", null)
 
-        // плейсхолдеры {sr}/{channels}/{lang} заполним пустыми — они не обязательны
         val outName = sanitizeName(
             applyTemplate(template, base, mapping.ext, mapping.mime.substringAfter("/"), "", "", "")
         )
 
         val outTmp = File.createTempFile("out_", ".${mapping.ext}", cacheDir)
         val mapArg = if (chosenExists) "0:a:$audioIndex" else "0:a:0"
-        val cmd = listOf("-hide_banner", "-y", "-i", inTmp.absolutePath, "-map", mapArg, "-c", "copy", outTmp.absolutePath)
-            .joinToString(" ")
 
-        val session = FFmpegKit.execute(cmd)
+        val args = listOf(
+            "-hide_banner", "-y",
+            "-i", src.toString(),
+            "-map", mapArg,
+            "-c", "copy",
+            outTmp.absolutePath
+        )
+
+        val session = FFmpegKit.executeWithArguments(args)
         if (!ReturnCode.isSuccess(session.returnCode)) {
-            inTmp.delete(); outTmp.delete()
+            outTmp.delete()
             throw IllegalStateException("FFmpeg error: ${session.returnCode}")
         }
 
@@ -108,7 +125,6 @@ class ExtractService : Service() {
         )
         NotificationUtils.done(this, NOTIF_ID, "Извлечение аудио", "Готово: ${index + 1}/$total", openPi)
 
-        inTmp.delete()
         outTmp.delete()
     }
 
@@ -129,7 +145,7 @@ class ExtractService : Service() {
     }
 
     private fun sanitizeName(s: String): String =
-        s.replace(Regex("""[\\/:*?"<>|]"""), "_")
+        s.replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
     private fun applyTemplate(tpl: String, base: String, ext: String, codec: String, sr: String, ch: String, lang: String): String =
         tpl.replace("{name}", base)
@@ -157,7 +173,7 @@ class ExtractService : Service() {
         val outDoc = targetDir.createFile(mime, displayName) ?: throw IllegalStateException("Не удалось создать файл в папке")
         contentResolver.openOutputStream(outDoc.uri)?.use { out ->
             srcFile.inputStream().use { it.copyTo(out) }
-        } ?: throw IllegalStateException("Не удалось открыть выходной поток")
+        } ?: throw IllegalStateException("Не удалось открыть целевой поток")
         return outDoc.uri
     }
 
