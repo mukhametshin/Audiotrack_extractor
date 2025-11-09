@@ -104,7 +104,8 @@ class ExtractService : Service() {
             outTmp.absolutePath
         )
 
-        val session = FFmpegKit.executeWithArguments(args)
+        // IMPORTANT: FFmpegKit expects an Array<String>, not a List<String>
+        val session = FFmpegKit.executeWithArguments(args.toTypedArray())
         if (!ReturnCode.isSuccess(session.returnCode)) {
             outTmp.delete()
             throw IllegalStateException("FFmpeg error: ${session.returnCode}")
