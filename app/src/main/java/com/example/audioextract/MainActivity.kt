@@ -1,4 +1,3 @@
-
 package com.example.audioextract
 
 import android.Manifest
@@ -12,7 +11,6 @@ import android.view.Menu
 import android.view.MenuItem
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -26,17 +24,13 @@ class MainActivity : AppCompatActivity() {
 
     private val notifPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { _ ->
-        handleIntent(intent)
-    }
+    ) { _ -> handleIntent(intent) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
         status = findViewById(R.id.status)
         progress = findViewById(R.id.progress)
-
         maybeAskNotifPermission { handleIntent(intent) }
     }
 
@@ -60,11 +54,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun maybeAskNotifPermission(after: () -> Unit) {
-        if (Build.VERSION.SDK_INT >= 33) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                return
-            }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
         }
         after()
     }
@@ -73,19 +66,18 @@ class MainActivity : AppCompatActivity() {
         val action = intent?.action ?: return
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         val mode = prefs.getString("track_mode", "prompt")
+
         when (action) {
             Intent.ACTION_SEND -> {
-                val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-                if (uri == null) {
-                    status.text = "Не получил файл."
-                    return
+                val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM) ?: run {
+                    status.text = "Не получил файл."; return
                 }
                 val inTmp = CacheUtils.copyToCache(this, uri) ?: run {
-                    status.text = "Не удалось открыть входной файл."
-                    return
+                    status.text = "Не удалось открыть входной файл."; return
                 }
                 val info = FFprobeKit.getMediaInformation(inTmp.absolutePath).mediaInformation
                 val audios = info?.streams?.filter { it.type.equals("audio", true) } ?: emptyList()
+
                 if (mode == "first" || audios.size <= 1) {
                     startExtractService(arrayListOf(uri), 0)
                 } else if (mode == "remember") {
@@ -93,11 +85,8 @@ class MainActivity : AppCompatActivity() {
                     startExtractService(arrayListOf(uri), remembered)
                 } else {
                     val items = audios.mapIndexed { idx, s ->
-                        val lang = s.tags?.get("language") ?: s.language ?: "und"
-                        val ch = s.channels ?: 0
-                        val sr = s.sampleRate ?: "?"
-                        val codec = s.codec ?: s.codecName ?: "audio"
-                        "#$idx · ${codec} · ${ch}ch · ${sr} Hz · ${lang}"
+                        val codec = s.codec ?: "audio"
+                        "#$idx · $codec"
                     }.toTypedArray()
                     AlertDialog.Builder(this)
                         .setTitle("Выбери аудиодорожку")
@@ -111,65 +100,54 @@ class MainActivity : AppCompatActivity() {
                         .show()
                 }
             }
+
             Intent.ACTION_SEND_MULTIPLE -> {
                 val list = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
-                if (list.isNullOrEmpty()) {
-                    status.text = "Список пуст."
+                if (list.isNullOrEmpty()) { status.text = "Список пуст."; return }
+                val inTmp = CacheUtils.copyToCache(this, list.first()) ?: run {
+                    startExtractService(ArrayList(list), 0); return
+                }
+                val info = FFprobeKit.getMediaInformation(inTmp.absolutePath).mediaInformation
+                val audios = info?.streams?.filter { it.type.equals("audio", true) } ?: emptyList()
+
+                if (mode == "first" || audios.size <= 1) {
+                    startExtractService(ArrayList(list), 0)
+                } else if (mode == "remember") {
+                    val remembered = prefs.getInt("remembered_index", 0)
+                    startExtractService(ArrayList(list), remembered)
                 } else {
-                    val inTmp = CacheUtils.copyToCache(this, list.first()) ?: run {
-                        startExtractService(ArrayList(list), 0); return
-                    }
-                    val info = FFprobeKit.getMediaInformation(inTmp.absolutePath).mediaInformation
-                    val audios = info?.streams?.filter { it.type.equals("audio", true) } ?: emptyList()
-                    if (mode == "first" || audios.size <= 1) {
-                        startExtractService(ArrayList(list), 0)
-                    } else if (mode == "remember") {
-                        val remembered = prefs.getInt("remembered_index", 0)
-                        startExtractService(ArrayList(list), remembered)
-                    } else {
-                        val items = audios.mapIndexed { idx, s ->
-                            val lang = s.tags?.get("language") ?: s.language ?: "und"
-                            val ch = s.channels ?: 0
-                            val sr = s.sampleRate ?: "?"
-                            val codec = s.codec ?: s.codecName ?: "audio"
-                            "#$idx · ${codec} · ${ch}ch · ${sr} Hz · ${lang}"
-                        }.toTypedArray()
-                        AlertDialog.Builder(this)
-                            .setTitle("Выбери аудиодорожку (для всех файлов)")
-                            .setItems(items) { _, which ->
-                                if (mode == "remember") {
-                                    prefs.edit().putInt("remembered_index", which).apply()
-                                }
-                                startExtractService(ArrayList(list), which)
+                    val items = audios.mapIndexed { idx, s ->
+                        val codec = s.codec ?: "audio"
+                        "#$idx · $codec"
+                    }.toTypedArray()
+                    AlertDialog.Builder(this)
+                        .setTitle("Выбери аудиодорожку (для всех файлов)")
+                        .setItems(items) { _, which ->
+                            if (mode == "remember") {
+                                prefs.edit().putInt("remembered_index", which).apply()
                             }
-                            .setCancelable(false)
-                            .show()
-                    }
+                            startExtractService(ArrayList(list), which)
+                        }
+                        .setCancelable(false)
+                        .show()
                 }
             }
-            else -> {
-                status.text = "Открой видео и поделись им сюда."
-            }
+
+            else -> status.text = "Открой видео и поделись им сюда."
         }
     }
 
     private fun startExtractService(uris: ArrayList<Uri>, audioIndex: Int) {
         progress.progress = 0
         status.text = "Запущено…"
-        val strUris = ArrayList<String>(uris.size)
-        uris.forEach { strUris.add(it.toString()) }
+        val strUris = ArrayList<String>(uris.size).apply { uris.forEach { add(it.toString()) } }
         val i = Intent(this, ExtractService::class.java)
             .putStringArrayListExtra(ExtractService.EXTRA_URIS, strUris)
             .putExtra(ExtractService.EXTRA_AUDIO_INDEX, audioIndex)
-        if (Build.VERSION.SDK_INT >= 26) {
-            startForegroundService(i)
-        } else {
-            startService(i)
-        }
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
     }
 }
 
-/** helper для копирования content: URI во временный файл */
 object CacheUtils {
     fun copyToCache(ctx: android.content.Context, src: Uri): java.io.File? {
         return try {
@@ -178,7 +156,7 @@ object CacheUtils {
                 f.outputStream().use { out -> `in`.copyTo(out) }
             } ?: return null
             f
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             null
         }
     }
