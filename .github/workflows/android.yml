@@ -11,6 +11,7 @@ jobs:
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_HOME: /usr/local/lib/android/sdk
+      ORG_GRADLE_CONSOLE: plain
 
     steps:
       - name: Checkout
@@ -21,7 +22,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Ensure cmdline-tools (sdkmanager)
         shell: bash
@@ -41,38 +41,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          { for i in {1..10}; do printf 'y\n'; done; } \
-            | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
+          { for i in {1..10}; do printf 'y\n'; done; }             | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null || true
 
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euxo pipefail
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" || true
-
-      - name: Setup Gradle caching
-        uses: gradle/actions/setup-gradle@v3
-
-      # ВАЖНО: убедиться, что есть wrapper и он исполняемый
-      - name: Verify Gradle wrapper
-        shell: bash
-        run: |
-          set -euxo pipefail
-          ls -la
-          if [ ! -f ./gradlew ]; then
-            echo "::error ::Gradle wrapper (./gradlew) не найден. Добавь в репозиторий файлы: gradlew, gradlew.bat, gradle/wrapper/gradle-wrapper.jar, gradle/wrapper/gradle-wrapper.properties"
-            exit 1
-          fi
-          chmod +x ./gradlew
-          ./gradlew --version
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT"             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0" || true
 
       - name: Build (clean assembleDebug)
-        env:
-          ORG_GRADLE_CONSOLE: plain
-        run: ./gradlew --no-daemon clean assembleDebug --stacktrace --info --warning-mode all
+        uses: gradle/gradle-build-action@v2
+        with:
+          gradle-version: 8.9
+          arguments: clean assembleDebug --stacktrace --info --warning-mode all
 
       - name: Upload debug APK
         if: always()
