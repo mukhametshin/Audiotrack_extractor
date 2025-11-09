@@ -62,7 +62,8 @@ jobs:
 
       - name: Build (clean assembleDebug)
         run: ./gradlew clean assembleDebug --stacktrace --info --warning-mode all
-        env: ORG_GRADLE_CONSOLE: plain
+        env:
+          ORG_GRADLE_CONSOLE: plain
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.9
