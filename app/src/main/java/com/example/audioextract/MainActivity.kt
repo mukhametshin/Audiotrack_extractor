@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -28,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logView: TextView
 
     private fun appendLog(line: String) {
+        Log.d("MainActivity", "Log: $line")
         logView.append((if (logView.text.isNullOrEmpty()) "" else "\n") + line)
     }
 
@@ -72,14 +74,18 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        Log.d("MainActivity", "Activity created")
+
         status = findViewById(R.id.status)
         progress = findViewById(R.id.progress)
         logView = findViewById(R.id.logView)
+
         maybeAskNotifPermission { handleIntent(intent) }
     }
 
     override fun onStart() {
         super.onStart()
+        Log.d("MainActivity", "onStart called")
         val f = IntentFilter().apply {
             addAction(ExtractService.ACTION_LOG)
             addAction(ExtractService.ACTION_PROGRESS)
@@ -93,6 +99,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        Log.d("MainActivity", "onStop called")
         try { unregisterReceiver(progressReceiver) } catch (_: Throwable) {}
     }
 
