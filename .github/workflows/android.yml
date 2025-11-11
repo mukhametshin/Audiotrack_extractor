@@ -23,8 +23,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # FIX: correctly place cmdline-tools contents into .../latest/
-      # and always call sdkmanager via full path in $SDKMAN
       - name: Ensure cmdline-tools (sdkmanager)
         shell: bash
         run: |
@@ -33,12 +31,10 @@ jobs:
           SDKMAN="$SDK/cmdline-tools/latest/bin/sdkmanager"
           mkdir -p "$SDK/cmdline-tools"
           if [ ! -x "$SDKMAN" ]; then
-            echo "Installing cmdline-tools..."
             curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmd.zip
             rm -rf /tmp/cmd && mkdir -p /tmp/cmd
             unzip -q /tmp/cmd.zip -d /tmp/cmd
             mkdir -p "$SDK/cmdline-tools/latest"
-            # IMPORTANT: move CONTENTS, not the parent folder, to avoid nesting latest/cmdline-tools/bin
             mv /tmp/cmd/cmdline-tools/* "$SDK/cmdline-tools/latest/"
           fi
           "$SDK/cmdline-tools/latest/bin/sdkmanager" --version
@@ -57,7 +53,10 @@ jobs:
           set -euxo pipefail
           SDK="$ANDROID_SDK_ROOT"
           SDKMAN="$SDK/cmdline-tools/latest/bin/sdkmanager"
-          "$SDKMAN" --sdk_root="$SDK"             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0" || true
+          "$SDKMAN" --sdk_root="$SDK" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" || true
 
       - name: Build (clean assembleDebug)
         uses: gradle/gradle-build-action@v2
